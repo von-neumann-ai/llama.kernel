@@ -72,6 +72,8 @@ void run(queue &Q, int M, int N, int K)
     auto time = time_gemms(ncalls + 1) - tare;
     auto avg = time / ncalls;
 
+    std::cout << "\nAverage time: " << avg << std::endl;
+
     /* Calculate and display performance */
     auto op_count = double(M) * double(N) * double(K) * 2;
     auto flops = op_count / avg;

@@ -20,14 +20,7 @@ Later on I'll make installation of environment significantly easier by packaging
 
 ## Software Strategy
 
-Design decision pending: We have two options:
-
-1. Use libraries from OneAPI like OneDNN and OneMKL so that building blocks below are taken from them directly. These kernels are highly performant but they are not portable. In particular, kernels for intel GPUs are not even opensource. This will mean I might not have flexibility to implement custom kernels.
-2. Write custom kernels as much as possible even though they might not be very performant. This is because we know that maximum performance benefit is in quantization and utilization of bandwidth (see below). These custom kernels can then be optimized for quantization. For testing, compare customer kernels with serial cpp code.
-
-Not sure which one to chose. If #2 is able to get 50% of the perf of #1, I would go with #2. Need to understand how much work it is to get there.
-
-I wish I have something like triton where I can write kernel in high level but it gets autotuned to the GPU I am using.
+Decided to use Intel's libraries as opposed to my custom kernels. This means I can't go further than what these libraries offer in terms of quantization. See appendix below for detailed benchmarking.
 
 Building blocks we need:
 
@@ -68,3 +61,126 @@ Beyond the links from above, here are some assorted links:
 
 1. https://siboehm.com/articles/22/CUDA-MMM
 2. https://github.com/codeplaysoftware/portBLAS
+
+# Appendix
+
+## Design Decision on Kernels
+
+We have two options:
+
+1. Use libraries from OneAPI like OneDNN and OneMKL so that building blocks below are taken from them directly. These kernels are highly performant but they are not portable. In particular, kernels for intel GPUs are not even open source. This will mean I might not have flexibility to implement custom kernels.
+2. Write custom kernels as much as possible even though they might not be very performant. This is because we know that maximum performance benefit is in quantization and utilization of bandwidth (see below). These custom kernels can then be optimized for quantization. For testing, compare customer kernels with serial cpp code.
+
+Not sure which one to chose. If #2 is able to get 50% of the perf of #1, I would go with #2. Need to understand how much work it is to get there. I wish I have something like triton where I can write kernel in high level but it gets autotuned to the GPU I am using.
+
+To resolve this, I did some benchmarking on my machine by compiling [code from here](https://github.com/oneapi-src/oneAPI-samples/tree/master/Publications/GPU-Opt-Guide/libraries-kernel) (I made small modification by running kernel in loops):
+
+```
+$ ./matmul_onemkl 1024 1024
+Running on: Intel(R) Arc(TM) A370M Graphics
+oneMKL SGEMM of 1024 x 1024 and 1024 x 1024 matrices took 0.105589 seconds.
+oneMKL SGEMM of 1024 x 1024 and 1024 x 1024 matrices took 0.00151356 seconds.
+oneMKL SGEMM of 1024 x 1024 and 1024 x 1024 matrices took 0.000875378 seconds.
+oneMKL SGEMM of 1024 x 1024 and 1024 x 1024 matrices took 0.000880327 seconds.
+oneMKL SGEMM of 1024 x 1024 and 1024 x 1024 matrices took 0.000973431 seconds.
+oneMKL SGEMM of 1024 x 1024 and 1024 x 1024 matrices took 0.000943086 seconds.
+oneMKL SGEMM of 1024 x 1024 and 1024 x 1024 matrices took 0.000790954 seconds.
+oneMKL SGEMM of 1024 x 1024 and 1024 x 1024 matrices took 0.000811881 seconds.
+oneMKL SGEMM of 1024 x 1024 and 1024 x 1024 matrices took 0.000799759 seconds.
+oneMKL SGEMM of 1024 x 1024 and 1024 x 1024 matrices took 0.00079287 seconds.
+oneMKL SGEMM of 1024 x 1024 and 1024 x 1024 matrices took 0.000809851 seconds.
+oneMKL SGEMM of 1024 x 1024 and 1024 x 1024 matrices took 0.000793364 seconds.
+oneMKL SGEMM of 1024 x 1024 and 1024 x 1024 matrices took 0.000837521 seconds.
+oneMKL SGEMM of 1024 x 1024 and 1024 x 1024 matrices took 0.000787656 seconds.
+oneMKL SGEMM of 1024 x 1024 and 1024 x 1024 matrices took 0.000835357 seconds.
+oneMKL SGEMM of 1024 x 1024 and 1024 x 1024 matrices took 0.000787074 seconds.
+Program completed without errors.
+
+$ ./naive_matmul_sycl 1024 1024
+Running on: Intel(R) Arc(TM) A370M Graphics
+Naive DPC++ multiplication of 1024 x 1024 and 1024 x 1024 matrices took 0.94135 seconds.
+Naive DPC++ multiplication of 1024 x 1024 and 1024 x 1024 matrices took 0.110893 seconds.
+Naive DPC++ multiplication of 1024 x 1024 and 1024 x 1024 matrices took 0.111184 seconds.
+Naive DPC++ multiplication of 1024 x 1024 and 1024 x 1024 matrices took 0.111221 seconds.
+Naive DPC++ multiplication of 1024 x 1024 and 1024 x 1024 matrices took 0.109634 seconds.
+Naive DPC++ multiplication of 1024 x 1024 and 1024 x 1024 matrices took 0.110257 seconds.
+Naive DPC++ multiplication of 1024 x 1024 and 1024 x 1024 matrices took 0.110544 seconds.
+Naive DPC++ multiplication of 1024 x 1024 and 1024 x 1024 matrices took 0.110772 seconds.
+Naive DPC++ multiplication of 1024 x 1024 and 1024 x 1024 matrices took 0.111249 seconds.
+Naive DPC++ multiplication of 1024 x 1024 and 1024 x 1024 matrices took 0.110385 seconds.
+Naive DPC++ multiplication of 1024 x 1024 and 1024 x 1024 matrices took 0.110823 seconds.
+Naive DPC++ multiplication of 1024 x 1024 and 1024 x 1024 matrices took 0.110827 seconds.
+Naive DPC++ multiplication of 1024 x 1024 and 1024 x 1024 matrices took 0.110138 seconds.
+Naive DPC++ multiplication of 1024 x 1024 and 1024 x 1024 matrices took 0.110781 seconds.
+Naive DPC++ multiplication of 1024 x 1024 and 1024 x 1024 matrices took 0.110267 seconds.
+Naive DPC++ multiplication of 1024 x 1024 and 1024 x 1024 matrices took 0.110174 seconds.
+Program completed without errors.
+```
+
+As you can see, mkl is significantly faster than fairly naive kernel! To compute flops from time to run the above 1024 square matrix multiplication, here's the formula:
+
+```python
+# insert number from above
+time_per_iter = 0.110174
+N = 1024
+num_ops = 2 * (N ** 3)
+flops = num_ops / time_per_iter
+gflops = flops / 1e9
+print(gflops)
+```
+
+For onemkl, we get gflops = 2706 and for naive matmul, we get gflops = 19. This means our naive kernel has 19/2706 < 1% perf of the kernel from onemkl. Therefore, we reject the approach of writing custom kernels as of now.
+
+To confirm these benchmarks, I have also run benchmarks of [code from the dpc++ book](https://github.com/Apress/data-parallel-CPP). In this book, chapter 9 and 15 has matmul examples with different optimizations. I have modified these benchmarks to use matrix size of 1024 and ran benchmarks. Here are some numbers:
+
+```
+fig_9_4_naive_matmul
+Running on device: Intel(R) Arc(TM) A370M Graphics
+Success!
+GFlops: 265.018
+
+fig_9_8_ndrange_tiled_matmul
+Running on device: Intel(R) Arc(TM) A370M Graphics
+Success!
+GFlops: 17.7596
+
+fig_9_11_matmul_broadcast
+Running on device: Intel(R) Arc(TM) A370M Graphics
+Success!
+GFlops: 17.7605
+
+fig_9_12_ndrange_sub_group_matmul
+Running on device: Intel(R) Arc(TM) A370M Graphics
+Success!
+GFlops: 189.695
+
+fig_15_5_somewhat_parallel_matrix_multiplication
+Running on device: Intel(R) Arc(TM) A370M Graphics
+Success!
+GFlops: 8.79453
+
+fig_15_7_more_parallel_matrix_multiplication
+Running on device: Intel(R) Arc(TM) A370M Graphics
+Success!
+GFlops: 265.421
+
+fig_15_12_small_work_group_matrix_multiplication
+Running on device: Intel(R) Arc(TM) A370M Graphics
+Success!
+GFlops: 15.3246
+
+fig_15_18_columns_matrix_multiplication
+Running on device: Intel(R) Arc(TM) A370M Graphics
+Success!
+GFlops: 32.194
+```
+
+Again these numbers confirm bad perf on custom kernels and best among these is still < 10% of onemkl kernels. So we'll stick with libraries.
+
+## Triton
+
+As I said above, quite envious of [performance obtained by triton](https://triton-lang.org/main/getting-started/tutorials/03-matrix-multiplication.html) which is comparable to cublas in Nvidia GPUs. Gotta experiment with [Intel's version of triton](https://github.com/intel/intel-xpu-backend-for-triton). If it's not upto mark, I will consider writing my own compiler.
+
+I tried installing released version of Intel triton and that [is buggy](https://github.com/intel/intel-xpu-backend-for-triton/issues/334). Build from source also [failed](https://github.com/intel/intel-xpu-backend-for-triton/issues/335). I will revisit this after a few days.
+
+Triton seems to be pretty powerful abstraction: small code not dissimilar from hierarchical kernel of dpc++ is able to produce onemkl level of perf (on Nvidia GPUs so far though). Gotta confirm if this performance portability also works for Intel GPUs. If so, I'll work on my non-pytorch tied version of triton.
