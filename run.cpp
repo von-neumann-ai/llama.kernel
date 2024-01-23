@@ -22,7 +22,7 @@
 using namespace sycl;
 
 template <typename T>
-void test(queue &Q, int M, int N, int K)
+void run(queue &Q, int M, int N, int K)
 {
     std::cout << "\nBenchmarking (" << M << " x " << K << ") x (" << K << " x " << N << ") matrix multiplication, " << type_string<T>() << std::endl;;
 
@@ -103,9 +103,8 @@ void usage(const char *pname)
               << "  " << pname << " [type] M N K       benchmark (MxK) x (KxN) square matrix multiplication\n"
               << "\n"
               << "The optional [type] selects the data type:\n"
-              << "   double    [default]\n"
+              << "   half    [default]\n"
               << "   single\n"
-              << "   half\n"
               << "\n"
               << "This benchmark uses the default DPC++ device, which can be controlled using\n"
               << "  the ONEAPI_DEVICE_SELECTOR environment variable\n";
@@ -116,7 +115,7 @@ int main(int argc, char **argv)
 {
     auto pname = argv[0];
     int M = 4096, N = 4096, K = 4096;
-    std::string type = "double";
+    std::string type = "half";
 
     if (argc <= 1)
         usage(pname);
@@ -144,12 +143,10 @@ int main(int argc, char **argv)
               << "Core/EU count:           " << Q.get_device().get_info<info::device::max_compute_units>()             << std::endl
               << "Maximum clock frequency: " << Q.get_device().get_info<info::device::max_clock_frequency>() << " MHz" << std::endl;
 
-    if (type == "double")
-        test<double>(Q, M, N, K);
+    if (type == "half")
+        run<half>(Q, M, N, K);
     else if (type == "single" || type == "float")
-        test<float>(Q, M, N, K);
-    else if (type == "half")
-        test<half>(Q, M, N, K);
+        run<float>(Q, M, N, K);
     else
         usage(pname);
 }

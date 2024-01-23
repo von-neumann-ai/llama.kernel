@@ -10,7 +10,6 @@
 template <typename T> const char *type_string()     { return "unknown type"; }
 template <> const char *type_string<sycl::half>()   { return "half precision"; }
 template <> const char *type_string<float>()        { return "single precision"; }
-template <> const char *type_string<double>()       { return "double precision"; }
 
 /* Choose inter-column padding for optimal performance */
 template <typename T>
