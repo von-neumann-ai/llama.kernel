@@ -61,3 +61,10 @@ guix install llama.dpcpp
 ## Known Bugs
 
 1. Just had to restart the machine to get GPU working again. Likely driver crash. Restarting distrobox didn't help. Note that uptime was more than 10/15 days though. Not cool though.
+
+## References:
+
+Beyond the links from above, here are some assorted links:
+
+1. https://siboehm.com/articles/22/CUDA-MMM
+2. https://github.com/codeplaysoftware/portBLAS
