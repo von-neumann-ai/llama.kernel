@@ -43,3 +43,9 @@ Target experience:
 ```
 guix install llama.dpcpp
 ```
+
+
+
+## Known Bugs
+
+1. Just had to restart the machine to get GPU working again. Likely driver crash. Restarting distrobox didn't help. Note that uptime was more than 10/15 days though. Not cool though.
