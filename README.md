@@ -177,6 +177,40 @@ GFlops: 32.194
 
 Again these numbers confirm bad perf on custom kernels and best among these is still < 10% of onemkl kernels. So we'll stick with libraries.
 
+**Retry**
+
+I have posted on Intel's devhub discord about these results and they encouraged me to use Intel's XMX instruction based [joint-matrix](https://github.com/intel/llvm/blob/sycl/sycl/doc/extensions/experimental/sycl_ext_matrix/sycl_ext_oneapi_matrix.asciidoc) [sycl](https://www.intel.com/content/www/us/en/docs/oneapi/optimization-guide-gpu/2024-0/programming-intel-xmx-using-sycl-joint-matrix.html) [extensions](https://community.intel.com/t5/Blogs/Tech-Innovation/Artificial-Intelligence-AI/Architecting-for-Accelerators-Intel-AMX-and-Intel-XMX/post/1481022). I have taken example code from [OneAPI Samples](https://github.com/oneapi-src/oneAPI-samples/tree/master/Publications/GPU-Opt-Guide/joint-matrix) and modified it to do 1024 square mat mul. Here's the modified code: https://gist.github.com/chsasank/6061343f6589c8e3269e4d504bb64d2a
+
+Here are some benchmarks:
+
+```
+$ ./joint-matrix 
+time for gpu gemm 1024 1024 1024 for 20 trails: 13.7051
+estimated flops: 3.13385e+09
+passed
+```
+
+Compare this to OneMKL:
+
+```
+oneMKL DPC++ GEMM benchmark
+---------------------------
+Device:                  Intel(R) Arc(TM) A370M Graphics
+Core/EU count:           128
+Maximum clock frequency: 2050 MHz
+
+Benchmarking (1024 x 1024) x (1024 x 1024) matrix multiplication, half precision
+ -> Initializing data...
+ -> Warmup...
+ -> Timing...
+
+Average time: 0.000156107
+
+Average performance: 13.7565TF
+```
+
+This is honestly worse performance than the above. I guess I either have to triton based compiler or use onemkl kernels.
+
 ## Triton
 
 As I said above, quite envious of [performance obtained by triton](https://triton-lang.org/main/getting-started/tutorials/03-matrix-multiplication.html) which is comparable to cublas in Nvidia GPUs. Gotta experiment with [Intel's version of triton](https://github.com/intel/intel-xpu-backend-for-triton). If it's not upto mark, I will consider writing my own compiler.
