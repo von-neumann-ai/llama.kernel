@@ -215,6 +215,6 @@ This is honestly worse performance than the above. I guess I either have to trit
 
 As I said above, quite envious of [performance obtained by triton](https://triton-lang.org/main/getting-started/tutorials/03-matrix-multiplication.html) which is comparable to cublas in Nvidia GPUs. Gotta experiment with [Intel's version of triton](https://github.com/intel/intel-xpu-backend-for-triton). If it's not upto mark, I will consider writing my own compiler.
 
-I tried installing released version of Intel triton and that [is buggy](https://github.com/intel/intel-xpu-backend-for-triton/issues/334). Build from source also [failed](https://github.com/intel/intel-xpu-backend-for-triton/issues/335). I will revisit this after a few days.
+I tried installing released version of Intel triton and it works. Build from source works but performance is not there yet. Will revisit again in a week or two.
 
 Triton seems to be pretty powerful abstraction: small code not dissimilar from hierarchical kernel of dpc++ is able to produce onemkl level of perf (on Nvidia GPUs so far though). Gotta confirm if this performance portability also works for Intel GPUs. If so, I'll work on my non-pytorch tied version of triton.
