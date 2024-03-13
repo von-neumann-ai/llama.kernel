@@ -1,154 +1,139 @@
-//==============================================================
-// Copyright © 2023 Intel Corporation
-//
-// SPDX-License-Identifier: MIT
-// =============================================================
-//
-// Contents:
-//     A simple matrix multiplication benchmark, using the oneAPI Math Kernel
-//     Library (oneMKL).
-//
-
-#include <sycl/sycl.hpp>
-#include <oneapi/mkl.hpp>
-#include <chrono>
-#include <cstdlib>
-#include <iomanip>
 #include <iostream>
-#include <string>
+#include <sycl/sycl.hpp>
 
-#include "utilities.hpp"
+using namespace sycl::ext::oneapi::experimental::matrix;
+using bfloat16 = sycl::ext::oneapi::bfloat16;
 
-using namespace sycl;
+// parameters of inner kernel
+#define SG_SZ 8
 
-template <typename T>
-void run(queue &Q, int M, int N, int K)
-{
-    std::cout << "\nBenchmarking (" << M << " x " << K << ") x (" << K << " x " << N << ") matrix multiplication, " << type_string<T>() << std::endl;;
+#define TM 8
+#define TN SG_SZ
+#define TK 16
 
-    std::cout << " -> Initializing data...\n";
+// template struct for matrix
+template <typename T, size_t NUM_ROWS, size_t NUM_COLS>
+struct big_matrix {
+ private:
+  T *mat;
 
-    /* Allocate A/B/C matrices */
-    int lda = nice_ld<T>(M);
-    int ldb = nice_ld<T>(K);
-    int ldc = nice_ld<T>(M);
+ public:
+  T *get_data() { return mat; }
+  void set_data(T *data) { mat = data; }
+  big_matrix(T *data) : mat(data) {}
+};
 
-    auto A = malloc_device<T>(lda * K, Q);
-    auto B = malloc_device<T>(ldb * N, Q);
-    auto C = malloc_device<T>(ldc * N, Q);
+template <typename T1, typename T2, size_t M, size_t N, size_t K>
+void matrix_multiply(big_matrix<T1, M, N> &C, big_matrix<T2, M, K> &A,
+                     big_matrix<T2, K, N> &B) {
+  // kernel begin
+  size_t NDRangeM = M / TM;
+  size_t NDRangeN = N / TN;
+  sycl::buffer<bfloat16, 2> bufA(A.get_data(), sycl::range<2>(M, K));
+  sycl::buffer<bfloat16, 2> bufB(B.get_data(), sycl::range<2>(K, N));
+  sycl::buffer<float, 2> bufC(C.get_data(), sycl::range<2>(M, N));
 
-    /* Fill A/B with random data */
-    constexpr int rd_size = 1048576;
-    auto random_data = malloc_host<T>(rd_size, Q);
-    generate_random_data(rd_size, random_data);
+  sycl::queue q;
+  q.submit([&](sycl::handler &cgh) {
+     sycl::accessor accC(bufC, cgh, sycl::read_write);
+     sycl::accessor accA(bufA, cgh, sycl::read_only);
+     sycl::accessor accB(bufB, cgh, sycl::read_only);
 
-    replicate_data(Q, A, lda * K, random_data, rd_size);
-    replicate_data(Q, B, ldb * N, random_data, rd_size);
+     cgh.parallel_for(
+         sycl::nd_range<2>({NDRangeM, NDRangeN * SG_SZ}, {1, 1 * SG_SZ}),
+         [=](sycl::nd_item<2> spmd_item) [[intel::reqd_sub_group_size(SG_SZ)]] {
+           // The joint matrix API has to be accessed by all
+           // the workitems in a subgroup these functions will
+           // be called once by the subgroup no code divergence
+           // between the workitems
+           const auto global_idx = spmd_item.get_global_id(0);
+           const auto global_idy = spmd_item.get_global_id(1);
+           const auto sg_startx = global_idx - spmd_item.get_local_id(0);
+           const auto sg_starty = global_idy - spmd_item.get_local_id(1);
 
-    /* Measure time for a given number of GEMM calls */
-    auto time_gemms = [=, &Q](int runs) -> double {
-        using namespace oneapi::mkl;
-        using namespace std::chrono;
-        auto start = steady_clock::now();
-        for (int i = 0; i < runs; i++)
-            blas::gemm(Q, transpose::N, transpose::N, M, N, K, 1, A, lda, B, ldb, 0, C, ldc);
-        Q.wait_and_throw();
-        auto end = steady_clock::now();
-        return duration<double>(end - start).count();
-    };
+           sycl::sub_group sg = spmd_item.get_sub_group();
+           joint_matrix<sycl::sub_group, bfloat16, use::a, TM, TK,
+                        layout::row_major>
+               sub_a;
+           joint_matrix<sycl::sub_group, bfloat16, use::b, TK, TN,
+                        layout::row_major>
+               sub_b;
+           joint_matrix<sycl::sub_group, float, use::accumulator, TM, TN> sub_c;
 
-    /* Do a warmup call to initialize MKL and ensure kernels are JIT'ed if needed */
-    std::cout << " -> Warmup...\n";
-    (void) time_gemms(1);
-
-    /* Time one GEMM call, and estimate how many calls will be required to keep the
-     * GPU busy for 1s. */
-    auto tare = time_gemms(1);
-    int ncalls = std::max(4, std::min(1000, int(1. / tare)));
-
-    /* Time that many GEMMs, subtracting the first call time to remove host overhead.
-     * This gives a better idea of device performance. */
-    std::cout << " -> Timing...\n";
-    auto time = time_gemms(ncalls + 1) - tare;
-    auto avg = time / ncalls;
-
-    std::cout << "\nAverage time: " << avg << std::endl;
-
-    /* Calculate and display performance */
-    auto op_count = double(M) * double(N) * double(K) * 2;
-    auto flops = op_count / avg;
-
-    flops *= 1e-9;
-    char unit = 'G';
-    if (flops >= 1000.) {
-        flops *= 1e-3;
-        unit = 'T';
-    }
-    if (flops >= 1000.) {
-        flops *= 1e-3;
-        unit = 'P';
-    }
-
-    std::cout << "\nAverage performance: " << flops << unit << 'F' << std::endl;
-
-    /* Free data */
-    free(A, Q);
-    free(B, Q);
-    free(C, Q);
-    free(random_data, Q);
+           // fill C with zeros
+           joint_matrix_fill(sg, sub_c, 1.0);
+           for (int k = 0; k < K / TK; k += 1) {
+             joint_matrix_load(
+                 sg, sub_a, accA.get_pointer() + (sg_startx * TM) * K + k * TK,
+                 K);
+             joint_matrix_load(
+                 sg, sub_b,
+                 accB.get_pointer() + (sg_starty / SG_SZ) * TN + k * TK * N, N);
+             joint_matrix_mad(sg, sub_a, sub_b, sub_c);
+           }
+           joint_matrix_store(sg, sub_c,
+                              accC.get_pointer() + (sg_startx + TM) * N +
+                                  sg_starty / SG_SZ * TN,
+                              N, layout::row_major);
+         });
+   }).wait();
 }
 
-void usage(const char *pname)
-{
-    std::cerr << "Usage:\n"
-              << "  " << pname << " [type] N           benchmark (NxN) x (NxN) square matrix multiplication (default: N = 4096)\n"
-              << "  " << pname << " [type] M N K       benchmark (MxK) x (KxN) square matrix multiplication\n"
-              << "\n"
-              << "The optional [type] selects the data type:\n"
-              << "   half    [default]\n"
-              << "   single\n"
-              << "\n"
-              << "This benchmark uses the default DPC++ device, which can be controlled using\n"
-              << "  the ONEAPI_DEVICE_SELECTOR environment variable\n";
-    std::exit(1);
+float get_random() {
+  float r = static_cast<float>(rand()) / static_cast<float>(RAND_MAX);
+  return r;
 }
 
-int main(int argc, char **argv)
-{
-    auto pname = argv[0];
-    int M = 4096, N = 4096, K = 4096;
-    std::string type = "half";
+int main() {
+  static constexpr size_t MATRIX_M = TM * 2;
+  static constexpr size_t MATRIX_N = TN * 2;
+  static constexpr size_t MATRIX_K = TK * 2;
+  bfloat16 A[MATRIX_M][MATRIX_K];
+  bfloat16 B[MATRIX_K][MATRIX_N];
+  float C[MATRIX_M][MATRIX_N];
+  float D[MATRIX_M][MATRIX_N];
 
-    if (argc <= 1)
-        usage(pname);
-
-    if (argc > 1 && std::isalpha(argv[1][0])) {
-        type = argv[1];
-        argc--; argv++;
+  // init matrices
+  for (int i = 0; i < MATRIX_M; i++) {
+    for (int j = 0; j < MATRIX_K; j++) {
+      A[i][j] = bfloat16(get_random());
     }
-
-    if (argc > 1) M = N = K = std::atoi(argv[1]);
-
-    if (argc > 3) {
-        N = std::atoi(argv[2]);
-        K = std::atoi(argv[3]);
+  }
+  for (int i = 0; i < MATRIX_K; i++) {
+    for (int j = 0; j < MATRIX_N; j++) {
+      B[i][j] = bfloat16(get_random());
     }
+  }
+  // Init C, D with 1.0
+  for (int i = 0; i < MATRIX_M; i++) {
+    for (int j = 0; j < MATRIX_N; j++) {
+      C[i][j] = 1.0;
+      D[i][j] = 1.0;
+    }
+  }
 
-    if (M <= 0 || N <= 0 || K <= 0)
-        usage(pname);
+  // reference implementation
+  for (int i = 0; i < MATRIX_M; i++) {
+    for (int j = 0; j < MATRIX_N; j++) {
+      for (int k = 0; k < MATRIX_K; k++) {
+        D[i][j] += A[i][k] * B[k][j];
+      }
+    }
+  }
 
-    queue Q;
+  // create structs to pass around
+  big_matrix<float, MATRIX_M, MATRIX_N> MC((float *)&C);
+  big_matrix<bfloat16, MATRIX_M, MATRIX_K> MA((bfloat16 *)&A);
+  big_matrix<bfloat16, MATRIX_K, MATRIX_N> MB((bfloat16 *)&B);
+  matrix_multiply(MC, MA, MB);
 
-    std::cout << "oneMKL DPC++ GEMM benchmark\n"
-              << "---------------------------\n"
-              << "Device:                  " << Q.get_device().get_info<info::device::name>()                          << std::endl
-              << "Core/EU count:           " << Q.get_device().get_info<info::device::max_compute_units>()             << std::endl
-              << "Maximum clock frequency: " << Q.get_device().get_info<info::device::max_clock_frequency>() << " MHz" << std::endl;
-
-    if (type == "half")
-        run<half>(Q, M, N, K);
-    else if (type == "single" || type == "float")
-        run<float>(Q, M, N, K);
-    else
-        usage(pname);
+  // verify correctness
+  bool res = true;
+  for (int i = 0; i < MATRIX_M; i++) {
+    for (int j = 0; j < MATRIX_N; j++) {
+      if ((fabs(C[i][j] - D[i][j])) > 1e-5) res = false;
+    }
+  }
+  std::cout << (res ? "passed" : "failed") << std::endl;
+  return !res;
 }
